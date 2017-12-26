@@ -1,0 +1,18 @@
+{
+  "name": "todobutt",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "clone": "^2.1.1",
+    "fast-json-patch": "^2.0.6",
+    "pull-stream": "^3.6.1",
+    "redux": "^3.7.2",
+    "ssb-client": "^4.5.2"
+  }
+}

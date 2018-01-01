@@ -1,73 +1,90 @@
+const path = require('path')
 const pull = require('pull-stream')
 const ssbClient = require('ssb-client')
+const config = require('ssb-config')
+const ssbKeys = require('ssb-keys')
+const ssbParty = require('ssb-party')
 const { createStore } = require('redux')
+const jsonDiffer = require('fast-json-patch')
+const clone = require('clone')
+
+const createMsg = require('./createMsg')
+const createDeltaReducer = require('./delta').createReducer
+const manifest = require('./manifest.json')
+
 
 const defaultState = {
-  todos: [],
-  actions: {},
+  items: {},
 }
 
-// create a scuttlebot client using default settings
-// (server at localhost:8080, using key found at ~/.ssb/secret)
-ssbClient(function (err, sbot) {
+const keys = config.keys = ssbKeys.loadOrCreateSync(path.join(config.path, 'secret'))
+console.log('config:', config)
+const remote = `ws:localhost:${config.ws.port}~shs:${config.keys.public.split('.')[0]}`
+console.log('remote:', remote)
+
+ssbClient(
+  keys,                // optional, defaults to ~/.ssb/secret
+  {
+    manifest,
+    remote,
+    caps: config.caps
+  },
+  onSbotReady
+)
+
+// ssbParty(onSbotReady)
+
+function onSbotReady(err, sbot) {
+  
   if (err) throw err
 
-  // Create a Redux store holding the state of your app.
-  // Its API is { subscribe, dispatch, getState }.
-  let store = createStore(function (state = defaultState, action) {
-
-    if (action.type !== 'sbot') return state
-    
-    const msg = action.data
-    const content = msg.value.content
-    console.log(msg)
-
-    // if (!['todo', 'todoaction'].includes(content.type)) return state
-
-    switch (content.type) {
-      
-      case 'todo':
-        const todos = state.todos.slice()
-        const data = content
-        todos.push({ data, msg })
-        return Object.assign({}, state, { todos })
-      
-      case 'todoaction':
-        const todoAction = content.action
-        if (!todoAction) return state
-        const link = content.action.link
-        if (!link) return state
-        // update action's history
-        let actionHistory = state.actions[link] || []
-        actionHistory = [...actionHistory, msg]
-        const actions = Object.assign({}, state.actions)
-        actions[link] = actionHistory
-        // update item state
-        const item = state.todos.find((entry) => entry.msg.key === link)
-        if (item) {
-          item.data.complete = content.action.value
-        }
-        return Object.assign({}, state, { actions })
-      
-      default:
-        return state
-
-    }
-  })
+  let store = createStore(createDeltaReducer({
+    contentType: 'action',
+  }))
 
   store.subscribe(() => {
     // console.log(JSON.stringify(store.getState(), null, 2))
-    const { todos } = store.getState()
-    const todoState = todos.map(entry => entry.data)
-    console.log(JSON.stringify(todoState, null, 2))
+    const { items } = store.getState()
+    const state = Object.keys(items).map((key) => {
+      const item = items[key]
+      return item.state
+    })
+    console.log(JSON.stringify(state, null, 2))
   })
+
+  const thing = newThing({ label: 'pet snek' })
+  const id = thing.id
+
+  const messages = [
+    createMsg({ type: 'action', data: thing }),
+    createMsg({ type: 'action', data: { id, patch: createDelta({ label: 'pet 2 snekz' }) }}),
+    createMsg({ type: 'action', data: { id, patch: createDelta({ complete: true }) }}),
+    createMsg({ type: 'action', data: { id, patch: createDelta({ note: 'looks good' }) }}),
+  ]
 
   // feed all messages into state atom
   pull(
-    sbot.createFeedStream(),
+    // sbot.createFeedStream(),
+    pull.values(messages),
     pull.drain(function (msg) {
       store.dispatch({ type: 'sbot', data: msg })
     })
   )
 
-})
+}
+
+function playHistory(history) {
+  return history.reduce((val, entry) => jsonDiffer.applyPatch(val, entry).newDocument, {})
+}
+
+function newThing(state) {
+  return { id: newId(), patch: createDelta(state) }
+}
+
+function createDelta(update){
+  return jsonDiffer.compare({}, update)
+}
+
+function newId() {
+  return Math.floor(Math.random()*1e10)
+}
